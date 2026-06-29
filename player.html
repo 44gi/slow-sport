@@ -17,6 +17,9 @@
   #status { font-size:13px; color:#cfd3de; background:rgba(0,0,0,.25); padding:6px 12px; border-radius:999px; }
   #endlabel { position:fixed; top:0; left:0; right:0; text-align:center; padding-top:max(14px,env(safe-area-inset-top));
     font-size:clamp(28px,6vh,56px); font-weight:900; color:#ff5c5c; letter-spacing:4px; pointer-events:none; z-index:5; }
+  #practiceBanner { position:fixed; top:0; left:0; right:0; text-align:center; padding:max(10px,env(safe-area-inset-top)) 12px 10px;
+    background:rgba(255,184,77,.14); color:#ffb84d; font-size:clamp(13px,2.4vh,17px); font-weight:700; z-index:5; }
+  #practiceReset { margin-top:6px; padding:8px 18px; border:1px solid #3a4054; border-radius:10px; background:transparent; color:#9aa0b0; font-size:14px; }
   .stage { width:min(86vw,460px); display:flex; flex-direction:column; align-items:center; gap:clamp(20px,6vh,64px); }
   #slotbadge { width:100%; text-align:center; padding:12px 0; border-radius:14px;
     background:rgba(0,0,0,.28); font-size:clamp(18px,3.6vh,26px); font-weight:700; }
@@ -29,15 +32,17 @@
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v1.0</div>
+  <div id="version">v1.2</div>
   <div id="status" class="hidden"></div>
   <div id="endlabel" class="hidden">終了</div>
+  <div id="practiceBanner" class="hidden">満員で本戦には入れません（練習モード）</div>
 
   <div id="game" class="hidden">
     <div class="stage">
       <div id="slotbadge" class="hidden">プレイヤー <span id="slotno">?</span><span class="hint">タップで名前を変更</span></div>
       <div class="score" id="pen">0</div>
       <div id="bar"><div id="barfill"></div></div>
+      <button id="practiceReset" class="hidden">失点リセット</button>
     </div>
   </div>
 
@@ -47,14 +52,14 @@
   let phase='idle', countdownN=0;
   const $ = id => document.getElementById(id);
   const room = new URLSearchParams(location.search).get('room');
-  let conn=null, slot=null, hue=null, playerName='';
+  let conn=null, slot=null, hue=null, playerName='', practice=false;
 
   const HUES=[210,145,30,280,340,52,180,255];
   const bg     = h => `hsl(${h},55%,16%)`;
   const bgOver = h => `hsl(${h},66%,34%)`;
   const meter  = h => `hsl(${h},82%,60%)`;
 
-  const isActive = () => (phase==='idle' || phase==='running');
+  const isActive = () => practice || (phase==='idle' || phase==='running');
   function meterPct(ratio){ const r=Math.max(0,Math.min(1,ratio)); return 100*Math.log(1+CURVE*r)/Math.log(1+CURVE); }
 
   function fitScore(){
@@ -109,6 +114,15 @@
   }
 
   function setStatus(t){ $('status').textContent=t; $('status').classList.remove('hidden'); }
+  function gotoPractice(){
+    practice = true;                       // 進行に縛られず常時計測
+    $('practiceBanner').classList.remove('hidden');
+    $('practiceReset').classList.remove('hidden');
+    $('slotbadge').classList.add('hidden');
+    $('status').classList.add('hidden');
+    refreshScoreText();
+  }
+  $('practiceReset').addEventListener('click', ()=>{ penalty=0; refreshScoreText(); });
   function defaultName(){ return 'プレイヤー ' + (slot!=null && slot>=0 ? slot+1 : '?'); }
   function updateBadge(){ $('slotbadge').innerHTML = (playerName||defaultName()) + '<span class="hint">タップで名前を変更</span>'; }
 
@@ -141,7 +155,11 @@
       conn.on('open', ()=>{ setStatus('接続済み'); conn.send({type:'join'}); if(playerName) conn.send({type:'name',name:playerName}); });
       conn.on('data', d=>{
         if(!d) return;
-        if(d.type==='slot'){ slot=d.slot; if(slot>=0){ hue=HUES[slot%HUES.length]; updateBadge(); $('slotbadge').classList.remove('hidden'); } }
+        if(d.type==='slot'){
+          slot=d.slot;
+          if(slot<0){ gotoPractice(); return; }
+          hue=HUES[slot%HUES.length]; updateBadge(); $('slotbadge').classList.remove('hidden');
+        }
         else if(d.type==='reset'){ penalty=0; refreshScoreText(); }
         else if(d.type==='phase'){ applyPhase(d.phase, d.n); }
       });
