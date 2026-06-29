@@ -8,17 +8,21 @@
 <style>
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; font-family:-apple-system,sans-serif; background:#0f1117; color:#e8eaf0;
-    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    height:100vh; height:100dvh; overflow:hidden;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
     gap:18px; padding:20px; transition:background .18s; }
   #start { font-size:22px; padding:18px 36px; border:none; border-radius:14px; background:#4f7cff; color:#fff; font-weight:700; }
   #version { font-size:13px; color:#6b7180; }
   .hidden { display:none !important; }
   #status { font-size:13px; color:#cfd3de; background:rgba(0,0,0,.25); padding:6px 12px; border-radius:999px; }
-  .stage { width:min(86vw,460px); display:flex; flex-direction:column; align-items:center; gap:clamp(28px,8vh,72px); }
+  #endlabel { position:fixed; top:0; left:0; right:0; text-align:center; padding-top:max(14px,env(safe-area-inset-top));
+    font-size:clamp(28px,6vh,56px); font-weight:900; color:#ff5c5c; letter-spacing:4px; pointer-events:none; z-index:5; }
+  .stage { width:min(86vw,460px); display:flex; flex-direction:column; align-items:center; gap:clamp(20px,6vh,64px); }
   #slotbadge { width:100%; text-align:center; padding:12px 0; border-radius:14px;
     background:rgba(0,0,0,.28); font-size:clamp(18px,3.6vh,26px); font-weight:700; }
   #slotbadge .hint { display:block; font-size:11px; font-weight:400; color:#aeb4c2; margin-top:2px; }
   .score { width:100%; text-align:center; white-space:nowrap; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; }
+  .score.count { color:#4f9bff; }
   #bar { width:100%; height:46px; background:rgba(0,0,0,.3); border-radius:23px; overflow:hidden; }
   #barfill { height:100%; width:0%; background:#4f7cff; border-radius:23px; }
 </style>
@@ -27,6 +31,7 @@
   <button id="start">タップして計測開始</button>
   <div id="version">v0.9</div>
   <div id="status" class="hidden"></div>
+  <div id="endlabel" class="hidden">終了</div>
 
   <div id="game" class="hidden">
     <div class="stage">
@@ -122,6 +127,8 @@
   function applyPhase(p, n){
     phase = p; countdownN = n||0;
     if(phase==='countdown') penalty=0;     // カウントダウン中は0表示
+    $('pen').classList.toggle('count', phase==='countdown');
+    $('endlabel').classList.toggle('hidden', phase!=='ended');
     refreshScoreText();
   }
 
