@@ -9,15 +9,14 @@
   body {
     margin: 0; font-family: -apple-system, sans-serif;
     background: #0f1117; color: #e8eaf0;
-    height: 100vh; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 18px; padding: 20px;
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; padding: 20px;
     transition: background 0.15s;
   }
   body.over { background: #5c1a1a; }
-  #start {
-    font-size: 22px; padding: 18px 36px; border: none; border-radius: 14px;
-    background: #4f7cff; color: #fff; font-weight: 700;
-  }
+  #start { font-size: 22px; padding: 18px 36px; border: none; border-radius: 14px;
+    background: #4f7cff; color: #fff; font-weight: 700; }
+  #version { font-size: 13px; color: #6b7180; font-variant-numeric: tabular-nums; }
   .hidden { display: none !important; }
   .penalty { font-size: 88px; font-weight: 800; line-height: 1; }
   .penalty small { font-size: 18px; font-weight: 500; color: #9aa0b0; display: block; margin-top: 6px; }
@@ -25,8 +24,6 @@
   .row b { color: #e8eaf0; font-size: 19px; }
   #bar { width: 80%; height: 22px; background: #232838; border-radius: 11px; overflow: hidden; }
   #barfill { height: 100%; width: 0%; background: #4f7cff; }
-  .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; }
-  .controls label { font-size: 14px; color: #9aa0b0; }
   input[type=range] { width: 100%; }
   .panel { width: 88%; max-width: 420px; display: flex; flex-direction: column; gap: 14px;
     background: #161a26; border: 1px solid #232838; border-radius: 14px; padding: 16px; }
@@ -34,13 +31,12 @@
   .ctl-head { display: flex; justify-content: space-between; font-size: 14px; color: #9aa0b0; }
   .ctl-head b { color: #e8eaf0; font-size: 16px; font-variant-numeric: tabular-nums; }
   .hint { font-size: 11px; color: #6b7180; }
-  #version { font-size: 13px; color: #6b7180; font-variant-numeric: tabular-nums; }
   #reset { padding: 10px 16px; border: 1px solid #3a4054; border-radius: 8px; background: transparent; color: #9aa0b0; margin-top: 4px; }
 </style>
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v0.4</div>
+  <div id="version">v0.5</div>
 
   <div id="game" class="hidden">
     <div class="penalty"><span id="pen">0</span><small>失点</small></div>
@@ -64,9 +60,14 @@
         <div class="hint">大きいほど失点が入りにくい（連打防止）</div>
       </div>
       <div class="ctl">
-        <div class="ctl-head"><span>メーター追従速度</span><b id="smVal">0.25</b></div>
-        <input id="sm" type="range" min="0.05" max="1" step="0.05" value="0.25">
+        <div class="ctl-head"><span>メーター追従速度</span><b id="smVal">0.20</b></div>
+        <input id="sm" type="range" min="0.05" max="1" step="0.05" value="0.2">
         <div class="hint">大きいほど反応が速く、小さいほど滑らか</div>
+      </div>
+      <div class="ctl">
+        <div class="ctl-head"><span>メーター湾曲度</span><b id="curveVal">9</b></div>
+        <input id="curve" type="range" min="1" max="20" step="1" value="9">
+        <div class="hint">大きいほどしきい値付近で伸びが鈍り“ギリギリ感”が出る</div>
       </div>
       <button id="reset">失点リセット</button>
     </div>
@@ -76,61 +77,43 @@
 
 <script>
   let baseline = 9.8;
-  let ALPHA = 0.9;          // ベースライン追従度（スライダーで変更）
-  let THRESHOLD = 1.0;      // しきい値（スライダーで変更）
-  let COOLDOWN_MS = 200;    // 連続失点を防ぐ最小間隔（スライダーで変更）
-  let SMOOTHING = 0.25;     // メーター追従速度（スライダーで変更）
+  let ALPHA = 0.9, THRESHOLD = 1.0, COOLDOWN_MS = 200, SMOOTHING = 0.2, CURVE = 9;
   let penalty = 0;
-
-  // --- センサー側で更新する「最新の状態」 ---
-  let latestMotion = 0;     // 直近の生の動きの強さ
-  let lastRaw = {x:0, y:0, z:0};
-  let lastHitTime = 0;      // 直近に失点したミリ秒（クールダウン用）
-
-  // --- 描画側で滑らかに動かす「表示用の状態」 ---
-  let displayMotion = 0;    // latestMotion へ補間で追従する値
-
+  let latestMotion = 0, lastRaw = {x:0,y:0,z:0}, lastHitTime = 0;
+  let displayMotion = 0;
   const $ = id => document.getElementById(id);
 
-  // センサー：検知だけを担当（描画はしない）
+  // 対数メーター: しきい値に近づくほど伸びが鈍る
+  function meterPct(ratio) {
+    const r = Math.max(0, Math.min(1, ratio));
+    return 100 * Math.log(1 + CURVE * r) / Math.log(1 + CURVE);
+  }
+
   function handleMotion(e) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x === null) return;
     const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
     baseline = ALPHA * baseline + (1 - ALPHA) * mag;
     const motion = Math.abs(mag - baseline);
-    latestMotion = motion;
-    lastRaw = a;
-
+    latestMotion = motion; lastRaw = a;
     const now = performance.now();
     if (motion > THRESHOLD && now - lastHitTime > COOLDOWN_MS) {
-      penalty += 1;
-      lastHitTime = now;
-      $('pen').textContent = penalty;
+      penalty += 1; lastHitTime = now; $('pen').textContent = penalty;
     }
   }
 
-  // 描画：requestAnimationFrame で毎フレーム滑らかに動かす
   function render() {
-    // displayMotion を latestMotion へ滑らかに寄せる
     displayMotion += (latestMotion - displayMotion) * SMOOTHING;
-
-    const pct = Math.min(100, (displayMotion / THRESHOLD) * 100);
-    $('barfill').style.width = pct.toFixed(1) + '%';
+    $('barfill').style.width = meterPct(displayMotion / THRESHOLD).toFixed(1) + '%';
     $('motion').textContent = displayMotion.toFixed(1);
-
     const over = latestMotion > THRESHOLD;
     $('barfill').style.background = over ? '#ff5c5c' : '#4f7cff';
     document.body.classList.toggle('over', over);
-
-    $('raw').textContent =
-      `x: ${lastRaw.x.toFixed(1)}  y: ${lastRaw.y.toFixed(1)}  z: ${lastRaw.z.toFixed(1)}`;
-
+    $('raw').textContent = `x: ${lastRaw.x.toFixed(1)}  y: ${lastRaw.y.toFixed(1)}  z: ${lastRaw.z.toFixed(1)}`;
     requestAnimationFrame(render);
   }
 
   async function start() {
-    // iOSはユーザー操作内での許可取得が必須
     if (typeof DeviceMotionEvent !== 'undefined' &&
         typeof DeviceMotionEvent.requestPermission === 'function') {
       try {
@@ -139,36 +122,19 @@
       } catch (err) { alert('許可の取得に失敗: ' + err); return; }
     }
     window.addEventListener('devicemotion', handleMotion);
-
-    // 画面スリープ防止（iOS 16.4+）
-    try {
-      if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
-    } catch (e) {}
-
+    try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
     $('start').classList.add('hidden');
+    $('version').classList.add('hidden');
     $('game').classList.remove('hidden');
-    requestAnimationFrame(render);   // 描画ループ開始
+    requestAnimationFrame(render);
   }
 
   $('start').addEventListener('click', start);
-
-  $('th').addEventListener('input', e => {
-    THRESHOLD = parseFloat(e.target.value);
-    $('thVal').textContent = THRESHOLD.toFixed(1);
-  });
-  $('alpha').addEventListener('input', e => {
-    ALPHA = parseFloat(e.target.value);
-    $('alphaVal').textContent = ALPHA.toFixed(2);
-  });
-  $('cd').addEventListener('input', e => {
-    COOLDOWN_MS = parseInt(e.target.value, 10);
-    $('cdVal').textContent = COOLDOWN_MS;
-  });
-  $('sm').addEventListener('input', e => {
-    SMOOTHING = parseFloat(e.target.value);
-    $('smVal').textContent = SMOOTHING.toFixed(2);
-  });
-
+  $('th').addEventListener('input', e => { THRESHOLD = parseFloat(e.target.value); $('thVal').textContent = THRESHOLD.toFixed(1); });
+  $('alpha').addEventListener('input', e => { ALPHA = parseFloat(e.target.value); $('alphaVal').textContent = ALPHA.toFixed(2); });
+  $('cd').addEventListener('input', e => { COOLDOWN_MS = parseInt(e.target.value,10); $('cdVal').textContent = COOLDOWN_MS; });
+  $('sm').addEventListener('input', e => { SMOOTHING = parseFloat(e.target.value); $('smVal').textContent = SMOOTHING.toFixed(2); });
+  $('curve').addEventListener('input', e => { CURVE = parseInt(e.target.value,10); $('curveVal').textContent = CURVE; });
   $('reset').addEventListener('click', () => { penalty = 0; $('pen').textContent = 0; });
 </script>
 </body>
