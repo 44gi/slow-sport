@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>プレイヤー</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; font-family:-apple-system,sans-serif; background:#0f1117; color:#e8eaf0;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:16px; padding:20px; transition:background .15s; }
+  body.over { background:#5c1a1a; }
+  #start { font-size:22px; padding:18px 36px; border:none; border-radius:14px; background:#4f7cff; color:#fff; font-weight:700; }
+  #version { font-size:13px; color:#6b7180; }
+  .hidden { display:none !important; }
+  #status { font-size:13px; color:#9aa0b0; }
+  #slotbadge { font-size:15px; color:#9aa0b0; }
+  #slotbadge b { color:#4f7cff; font-size:20px; }
+  .penalty { font-size:88px; font-weight:800; line-height:1; }
+  .penalty small { font-size:18px; font-weight:500; color:#9aa0b0; display:block; margin-top:6px; }
+  #bar { width:80%; height:22px; background:#232838; border-radius:11px; overflow:hidden; }
+  #barfill { height:100%; width:0%; background:#4f7cff; }
+</style>
+</head>
+<body>
+  <button id="start">タップして計測開始</button>
+  <div id="version">v0.5</div>
+  <div id="status" class="hidden"></div>
+
+  <div id="game" class="hidden">
+    <div id="slotbadge" class="hidden">あなたは プレイヤー<b id="slotno">?</b></div>
+    <div class="penalty"><span id="pen">0</span><small>失点</small></div>
+    <div id="bar"><div id="barfill"></div></div>
+  </div>
+
+<script>
+  const ALPHA=0.9, THRESHOLD=1.0, COOLDOWN_MS=200, SMOOTHING=0.2, CURVE=9;
+  let baseline=9.8, penalty=0, latestMotion=0, lastHitTime=0, displayMotion=0;
+  const $ = id => document.getElementById(id);
+  const room = new URLSearchParams(location.search).get('room');
+  let conn = null, slot = null;
+
+  function meterPct(ratio){ const r=Math.max(0,Math.min(1,ratio)); return 100*Math.log(1+CURVE*r)/Math.log(1+CURVE); }
+
+  function handleMotion(e){
+    const a=e.accelerationIncludingGravity; if(!a||a.x===null) return;
+    const mag=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z);
+    baseline=ALPHA*baseline+(1-ALPHA)*mag;
+    const motion=Math.abs(mag-baseline);
+    latestMotion=motion;
+    const now=performance.now();
+    if(motion>THRESHOLD && now-lastHitTime>COOLDOWN_MS){ penalty++; lastHitTime=now; $('pen').textContent=penalty; }
+  }
+
+  function render(){
+    displayMotion += (latestMotion-displayMotion)*SMOOTHING;
+    $('barfill').style.width = meterPct(displayMotion/THRESHOLD).toFixed(1)+'%';
+    const over = latestMotion>THRESHOLD;
+    $('barfill').style.background = over ? '#ff5c5c' : '#4f7cff';
+    document.body.classList.toggle('over', over);
+    requestAnimationFrame(render);
+  }
+
+  function setStatus(t){ $('status').textContent=t; $('status').classList.remove('hidden'); }
+
+  function connect(){
+    if(!room) return;                       // 単体モード（部屋指定なし）
+    setStatus('スコアボードに接続中…');
+    const peer = new Peer();
+    peer.on('open', ()=>{
+      conn = peer.connect('ss-'+room, {reliable:false});
+      conn.on('open', ()=>{ setStatus('接続済み'); conn.send({type:'join'}); });
+      conn.on('data', d=>{ if(d && d.type==='slot'){ slot=d.slot; $('slotno').textContent=slot+1; $('slotbadge').classList.remove('hidden'); } });
+      conn.on('close', ()=> setStatus('切断されました。再読み込みしてください'));
+    });
+    peer.on('error', e=> setStatus('接続エラー: '+e.type+'（部屋コードを確認）'));
+    // 100msごとに状態送信
+    setInterval(()=>{
+      if(conn && conn.open) conn.send({type:'state', penalty, ratio: latestMotion/THRESHOLD, over: latestMotion>THRESHOLD});
+    }, 100);
+  }
+
+  async function start(){
+    if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
+      try{ const r=await DeviceMotionEvent.requestPermission(); if(r!=='granted'){ alert('センサーが許可されませんでした'); return; } }
+      catch(err){ alert('許可の取得に失敗: '+err); return; }
+    }
+    window.addEventListener('devicemotion', handleMotion);
+    try{ if('wakeLock' in navigator) await navigator.wakeLock.request('screen'); }catch(e){}
+    $('start').classList.add('hidden'); $('version').classList.add('hidden');
+    $('game').classList.remove('hidden');
+    requestAnimationFrame(render);
+    connect();
+  }
+  $('start').addEventListener('click', start);
+</script>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>スコアボード</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,sans-serif; background:#0f1117; color:#e8eaf0;
+    min-height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:16px; padding:12px 18px; border-bottom:1px solid #232838; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; font-weight:700; }
+  header .v { font-size:12px; color:#6b7180; }
+  .join { display:flex; align-items:center; gap:14px; margin-left:auto; flex-wrap:wrap; }
+  .join img { width:96px; height:96px; border-radius:8px; background:#fff; }
+  .join .code { font-size:13px; color:#9aa0b0; }
+  .join .code b { color:#e8eaf0; font-size:22px; letter-spacing:2px; font-variant-numeric:tabular-nums; }
+  .join .url { font-size:11px; color:#6b7180; word-break:break-all; max-width:240px; }
+  select, button { font-size:14px; padding:8px 12px; border-radius:8px; border:1px solid #3a4054;
+    background:#161a26; color:#e8eaf0; }
+  #stat { font-size:12px; color:#6b7180; padding:6px 18px; }
+  .grid { flex:1; display:grid; gap:12px; padding:16px; }
+  .cell { position:relative; background:#161a26; border:1px solid #232838; border-radius:16px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:18px;
+    transition:background .12s, border-color .12s; overflow:hidden; }
+  .cell.empty { opacity:.45; }
+  .cell.over { background:#5c1a1a; border-color:#ff5c5c; }
+  .cell .who { font-size:15px; color:#9aa0b0; }
+  .cell .score { font-size:18vmin; font-weight:800; line-height:.95; font-variant-numeric:tabular-nums; }
+  .cell .lbl { font-size:13px; color:#9aa0b0; margin-top:-6px; }
+  .cell .mbar { width:80%; height:14px; background:#232838; border-radius:7px; overflow:hidden; }
+  .cell .mfill { height:100%; width:0%; background:#4f7cff; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>スコアボード</h1><span class="v">v0.5</span>
+    <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option></select></label>
+    <button id="resetAll">全員リセット</button>
+    <div class="join">
+      <div>
+        <div class="code">部屋コード <b id="code">----</b></div>
+        <div class="url" id="url"></div>
+      </div>
+      <img id="qr" alt="QR">
+    </div>
+  </header>
+  <div id="stat">起動中…</div>
+  <div class="grid" id="grid"></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let MAX = 6;
+  // 部屋コード生成（紛らわしい文字を除外）
+  const CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const room = Array.from({length:5}, ()=>CH[Math.floor(Math.random()*CH.length)]).join('');
+  const joinUrl = location.href.replace(/scoreboard\.html.*$/,'').replace(/\/?$/,'/') + 'player.html?room=' + room;
+
+  $('code').textContent = room;
+  $('url').textContent = joinUrl;
+  $('qr').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(joinUrl);
+
+  const players = [];                 // slot -> {penalty, ratio, over}
+  const connSlot = new Map();         // conn -> slot
+
+  function meterPct(r){ const x=Math.max(0,Math.min(1,r)); return 100*Math.log(1+9*x)/Math.log(1+9); }
+
+  function buildGrid(){
+    const g = $('grid');
+    g.innerHTML = '';
+    const cols = MAX <= 2 ? 1 : (MAX <= 6 ? 2 : 3);
+    const rows = Math.ceil(MAX / cols);
+    g.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    g.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    for(let i=0;i<MAX;i++){
+      const c=document.createElement('div'); c.className='cell empty'; c.id='cell'+i;
+      c.innerHTML = `<div class="who">プレイヤー ${i+1}</div>
+        <div class="score" id="sc${i}">–</div><div class="lbl">失点</div>
+        <div class="mbar"><div class="mfill" id="mf${i}"></div></div>`;
+      g.appendChild(c);
+    }
+  }
+
+  function refresh(){
+    for(let i=0;i<MAX;i++){
+      const p=players[i], cell=$('cell'+i);
+      if(!cell) continue;
+      if(p){
+        cell.classList.remove('empty');
+        cell.classList.toggle('over', !!p.over);
+        $('sc'+i).textContent = p.penalty;
+        $('mf'+i).style.width = meterPct(p.ratio||0).toFixed(1)+'%';
+        $('mf'+i).style.background = p.over ? '#ff5c5c' : '#4f7cff';
+      } else {
+        cell.classList.add('empty'); cell.classList.remove('over');
+        $('sc'+i).textContent='–'; $('mf'+i).style.width='0%';
+      }
+    }
+    requestAnimationFrame(refresh);
+  }
+
+  function assignSlot(conn){
+    for(let i=0;i<MAX;i++){ if(!players[i]){ players[i]={penalty:0,ratio:0,over:false}; connSlot.set(conn,i); return i; } }
+    return -1;
+  }
+
+  const peer = new Peer('ss-'+room);
+  peer.on('open', ()=> $('stat').textContent = '待機中。スマホでQRを読み込んでください（部屋 '+room+'）');
+  peer.on('error', e=> $('stat').textContent = 'エラー: '+e.type+'（ページを再読み込みしてください）');
+  peer.on('connection', conn=>{
+    conn.on('data', d=>{
+      if(!d) return;
+      if(d.type==='join'){
+        const s=assignSlot(conn);
+        conn.send({type:'slot', slot:s});
+        $('stat').textContent = (s>=0? 'プレイヤー'+(s+1)+'が参加' : '満員のため参加できません');
+      } else if(d.type==='state'){
+        const s=connSlot.get(conn);
+        if(s!=null && players[s]){ players[s].penalty=d.penalty; players[s].ratio=d.ratio; players[s].over=d.over; }
+      }
+    });
+    conn.on('close', ()=>{ const s=connSlot.get(conn); if(s!=null){ players[s]=null; connSlot.delete(conn); } });
+  });
+
+  $('count').addEventListener('change', e=>{ MAX=parseInt(e.target.value,10); buildGrid(); });
+  $('resetAll').addEventListener('click', ()=>{ players.forEach(p=>{ if(p) p.penalty=0; }); });
+
+  buildGrid();
+  requestAnimationFrame(refresh);
+</script>
+</body>
+</html>
