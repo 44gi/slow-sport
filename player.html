@@ -32,10 +32,10 @@
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v1.2</div>
+  <div id="version">v1.3</div>
   <div id="status" class="hidden"></div>
   <div id="endlabel" class="hidden">終了</div>
-  <div id="practiceBanner" class="hidden">満員で本戦には入れません（練習モード）</div>
+  <div id="practiceBanner" class="hidden"></div>
 
   <div id="game" class="hidden">
     <div class="stage">
@@ -114,8 +114,9 @@
   }
 
   function setStatus(t){ $('status').textContent=t; $('status').classList.remove('hidden'); }
-  function gotoPractice(){
+  function gotoPractice(msg){
     practice = true;                       // 進行に縛られず常時計測
+    $('practiceBanner').textContent = msg || '練習モード';
     $('practiceBanner').classList.remove('hidden');
     $('practiceReset').classList.remove('hidden');
     $('slotbadge').classList.add('hidden');
@@ -147,7 +148,7 @@
   }
 
   function connect(){
-    if(!room) return;
+    if(!room){ gotoPractice('練習モード（スコアボード未接続）'); return; }   // 部屋番号なしの直接アクセス
     setStatus('スコアボードに接続中…');
     const peer=new Peer();
     peer.on('open', ()=>{
@@ -157,7 +158,7 @@
         if(!d) return;
         if(d.type==='slot'){
           slot=d.slot;
-          if(slot<0){ gotoPractice(); return; }
+          if(slot<0){ gotoPractice('満員で本戦には入れません（練習モード）'); return; }
           hue=HUES[slot%HUES.length]; updateBadge(); $('slotbadge').classList.remove('hidden');
         }
         else if(d.type==='reset'){ penalty=0; refreshScoreText(); }
