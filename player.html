@@ -6,31 +6,33 @@
 <title>プレイヤー</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; font-family:-apple-system,sans-serif; background:#0f1117; color:#e8eaf0;
     min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
-    gap:16px; padding:20px; transition:background .15s; }
-  body.over { background:#5c1a1a; }
+    gap:20px; padding:20px; transition:background .18s; }
   #start { font-size:22px; padding:18px 36px; border:none; border-radius:14px; background:#4f7cff; color:#fff; font-weight:700; }
   #version { font-size:13px; color:#6b7180; }
   .hidden { display:none !important; }
-  #status { font-size:13px; color:#9aa0b0; }
-  #slotbadge { font-size:15px; color:#9aa0b0; }
-  #slotbadge b { color:#4f7cff; font-size:20px; }
-  .penalty { font-size:88px; font-weight:800; line-height:1; }
-  .penalty small { font-size:18px; font-weight:500; color:#9aa0b0; display:block; margin-top:6px; }
-  #bar { width:80%; height:22px; background:#232838; border-radius:11px; overflow:hidden; }
-  #barfill { height:100%; width:0%; background:#4f7cff; }
+  #status { font-size:13px; color:#cfd3de; background:rgba(0,0,0,.25); padding:6px 12px; border-radius:999px; }
+  #slotbadge { font-size:20px; font-weight:700; padding:6px 18px; border-radius:999px; background:rgba(0,0,0,.28); }
+  .scorebox { display:flex; flex-direction:column; align-items:center; }
+  .score { font-size:clamp(96px, 42vmin, 320px); font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; }
+  .score-lbl { font-size:20px; color:#cfd3de; margin-top:4px; letter-spacing:2px; }
+  #bar { width:86%; max-width:520px; height:44px; background:rgba(0,0,0,.3); border-radius:22px; overflow:hidden; }
+  #barfill { height:100%; width:0%; background:#4f7cff; border-radius:22px; }
 </style>
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v0.5</div>
+  <div id="version">v0.6</div>
   <div id="status" class="hidden"></div>
 
   <div id="game" class="hidden">
-    <div id="slotbadge" class="hidden">あなたは プレイヤー<b id="slotno">?</b></div>
-    <div class="penalty"><span id="pen">0</span><small>失点</small></div>
+    <div id="slotbadge" class="hidden">プレイヤー <span id="slotno">?</span></div>
+    <div class="scorebox">
+      <div class="score" id="pen">0</div>
+      <div class="score-lbl">失点</div>
+    </div>
     <div id="bar"><div id="barfill"></div></div>
   </div>
 
@@ -39,9 +41,16 @@
   let baseline=9.8, penalty=0, latestMotion=0, lastHitTime=0, displayMotion=0;
   const $ = id => document.getElementById(id);
   const room = new URLSearchParams(location.search).get('room');
-  let conn = null, slot = null;
+  let conn=null, slot=null, hue=null;
+
+  // プレイヤー色（6色）。スコアボードと共通定義。
+  const HUES=[210,145,30,280,340,52];
+  const bg     = h => `hsl(${h},55%,16%)`;
+  const bgOver = h => `hsl(${h},66%,34%)`;
+  const meter  = h => `hsl(${h},82%,60%)`;
 
   function meterPct(ratio){ const r=Math.max(0,Math.min(1,ratio)); return 100*Math.log(1+CURVE*r)/Math.log(1+CURVE); }
+  function showScore(){ $('pen').textContent = penalty===0 ? '0' : '−'+penalty; }
 
   function handleMotion(e){
     const a=e.accelerationIncludingGravity; if(!a||a.x===null) return;
@@ -50,35 +59,43 @@
     const motion=Math.abs(mag-baseline);
     latestMotion=motion;
     const now=performance.now();
-    if(motion>THRESHOLD && now-lastHitTime>COOLDOWN_MS){ penalty++; lastHitTime=now; $('pen').textContent=penalty; }
+    if(motion>THRESHOLD && now-lastHitTime>COOLDOWN_MS){ penalty++; lastHitTime=now; showScore(); }
   }
 
   function render(){
     displayMotion += (latestMotion-displayMotion)*SMOOTHING;
     $('barfill').style.width = meterPct(displayMotion/THRESHOLD).toFixed(1)+'%';
     const over = latestMotion>THRESHOLD;
-    $('barfill').style.background = over ? '#ff5c5c' : '#4f7cff';
-    document.body.classList.toggle('over', over);
+    if(hue===null){
+      document.body.style.background = over ? '#5c1a1a' : '#0f1117';
+      $('barfill').style.background = over ? '#ff5c5c' : '#4f7cff';
+    } else {
+      document.body.style.background = over ? bgOver(hue) : bg(hue);
+      $('barfill').style.background = meter(hue);
+    }
     requestAnimationFrame(render);
   }
 
   function setStatus(t){ $('status').textContent=t; $('status').classList.remove('hidden'); }
 
   function connect(){
-    if(!room) return;                       // 単体モード（部屋指定なし）
+    if(!room) return;
     setStatus('スコアボードに接続中…');
-    const peer = new Peer();
+    const peer=new Peer();
     peer.on('open', ()=>{
-      conn = peer.connect('ss-'+room, {reliable:false});
+      conn=peer.connect('ss-'+room,{reliable:false});
       conn.on('open', ()=>{ setStatus('接続済み'); conn.send({type:'join'}); });
-      conn.on('data', d=>{ if(d && d.type==='slot'){ slot=d.slot; $('slotno').textContent=slot+1; $('slotbadge').classList.remove('hidden'); } });
+      conn.on('data', d=>{
+        if(!d) return;
+        if(d.type==='slot'){
+          slot=d.slot;
+          if(slot>=0){ hue=HUES[slot % HUES.length]; $('slotno').textContent=slot+1; $('slotbadge').classList.remove('hidden'); }
+        } else if(d.type==='reset'){ penalty=0; showScore(); }
+      });
       conn.on('close', ()=> setStatus('切断されました。再読み込みしてください'));
     });
     peer.on('error', e=> setStatus('接続エラー: '+e.type+'（部屋コードを確認）'));
-    // 100msごとに状態送信
-    setInterval(()=>{
-      if(conn && conn.open) conn.send({type:'state', penalty, ratio: latestMotion/THRESHOLD, over: latestMotion>THRESHOLD});
-    }, 100);
+    setInterval(()=>{ if(conn&&conn.open) conn.send({type:'state', penalty, ratio: latestMotion/THRESHOLD, over: latestMotion>THRESHOLD}); }, 100);
   }
 
   async function start(){
@@ -90,6 +107,7 @@
     try{ if('wakeLock' in navigator) await navigator.wakeLock.request('screen'); }catch(e){}
     $('start').classList.add('hidden'); $('version').classList.add('hidden');
     $('game').classList.remove('hidden');
+    showScore();
     requestAnimationFrame(render);
     connect();
   }

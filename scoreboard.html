@@ -17,25 +17,23 @@
   .join .code { font-size:13px; color:#9aa0b0; }
   .join .code b { color:#e8eaf0; font-size:22px; letter-spacing:2px; font-variant-numeric:tabular-nums; }
   .join .url { font-size:11px; color:#6b7180; word-break:break-all; max-width:240px; }
-  select, button { font-size:14px; padding:8px 12px; border-radius:8px; border:1px solid #3a4054;
-    background:#161a26; color:#e8eaf0; }
+  select, button { font-size:14px; padding:8px 12px; border-radius:8px; border:1px solid #3a4054; background:#161a26; color:#e8eaf0; }
   #stat { font-size:12px; color:#6b7180; padding:6px 18px; }
   .grid { flex:1; display:grid; gap:12px; padding:16px; }
-  .cell { position:relative; background:#161a26; border:1px solid #232838; border-radius:16px;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:18px;
+  .cell { position:relative; background:#161a26; border:2px solid #232838; border-radius:16px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:18px;
     transition:background .12s, border-color .12s; overflow:hidden; }
-  .cell.empty { opacity:.45; }
-  .cell.over { background:#5c1a1a; border-color:#ff5c5c; }
-  .cell .who { font-size:15px; color:#9aa0b0; }
-  .cell .score { font-size:18vmin; font-weight:800; line-height:.95; font-variant-numeric:tabular-nums; }
-  .cell .lbl { font-size:13px; color:#9aa0b0; margin-top:-6px; }
-  .cell .mbar { width:80%; height:14px; background:#232838; border-radius:7px; overflow:hidden; }
-  .cell .mfill { height:100%; width:0%; background:#4f7cff; }
+  .cell.empty { opacity:.4; }
+  .cell .who { font-size:16px; font-weight:700; }
+  .cell .score { font-size:16vmin; font-weight:900; line-height:.95; font-variant-numeric:tabular-nums; }
+  .cell .lbl { font-size:13px; color:#cfd3de; margin-top:-6px; }
+  .cell .mbar { width:82%; height:16px; background:rgba(0,0,0,.35); border-radius:8px; overflow:hidden; }
+  .cell .mfill { height:100%; width:0%; border-radius:8px; }
 </style>
 </head>
 <body>
   <header>
-    <h1>スコアボード</h1><span class="v">v0.5</span>
+    <h1>スコアボード</h1><span class="v">v0.6</span>
     <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option></select></label>
     <button id="resetAll">全員リセット</button>
     <div class="join">
@@ -52,31 +50,36 @@
 <script>
   const $ = id => document.getElementById(id);
   let MAX = 6;
-  // 部屋コード生成（紛らわしい文字を除外）
-  const CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const room = Array.from({length:5}, ()=>CH[Math.floor(Math.random()*CH.length)]).join('');
-  const joinUrl = location.href.replace(/scoreboard\.html.*$/,'').replace(/\/?$/,'/') + 'player.html?room=' + room;
 
-  $('code').textContent = room;
-  $('url').textContent = joinUrl;
-  $('qr').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(joinUrl);
+  // プレイヤー色（player.html と共通）
+  const HUES=[210,145,30,280,340,52];
+  const bg     = h => `hsl(${h},55%,16%)`;
+  const bgOver = h => `hsl(${h},66%,34%)`;
+  const meter  = h => `hsl(${h},82%,60%)`;
 
-  const players = [];                 // slot -> {penalty, ratio, over}
-  const connSlot = new Map();         // conn -> slot
+  const CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const room=Array.from({length:5},()=>CH[Math.floor(Math.random()*CH.length)]).join('');
+  const joinUrl=location.href.replace(/scoreboard\.html.*$/,'').replace(/\/?$/,'/')+'player.html?room='+room;
+  $('code').textContent=room;
+  $('url').textContent=joinUrl;
+  $('qr').src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(joinUrl);
+
+  const players=[];           // slot -> {penalty,ratio,over}
+  const connSlot=new Map();   // conn -> slot
 
   function meterPct(r){ const x=Math.max(0,Math.min(1,r)); return 100*Math.log(1+9*x)/Math.log(1+9); }
 
   function buildGrid(){
-    const g = $('grid');
-    g.innerHTML = '';
-    const cols = MAX <= 2 ? 1 : (MAX <= 6 ? 2 : 3);
-    const rows = Math.ceil(MAX / cols);
-    g.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-    g.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    const g=$('grid'); g.innerHTML='';
+    const cols = MAX<=2 ? 1 : (MAX<=6 ? 2 : 3);
+    const rows = Math.ceil(MAX/cols);
+    g.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+    g.style.gridTemplateRows=`repeat(${rows},1fr)`;
     for(let i=0;i<MAX;i++){
+      const h=HUES[i%HUES.length];
       const c=document.createElement('div'); c.className='cell empty'; c.id='cell'+i;
-      c.innerHTML = `<div class="who">プレイヤー ${i+1}</div>
-        <div class="score" id="sc${i}">–</div><div class="lbl">失点</div>
+      c.innerHTML=`<div class="who" style="color:${meter(h)}">プレイヤー ${i+1}</div>
+        <div class="score" id="sc${i}">—</div><div class="lbl">失点</div>
         <div class="mbar"><div class="mfill" id="mf${i}"></div></div>`;
       g.appendChild(c);
     }
@@ -84,17 +87,19 @@
 
   function refresh(){
     for(let i=0;i<MAX;i++){
-      const p=players[i], cell=$('cell'+i);
-      if(!cell) continue;
+      const p=players[i], cell=$('cell'+i); if(!cell) continue;
+      const h=HUES[i%HUES.length];
       if(p){
         cell.classList.remove('empty');
-        cell.classList.toggle('over', !!p.over);
-        $('sc'+i).textContent = p.penalty;
+        cell.style.background = p.over ? bgOver(h) : bg(h);
+        cell.style.borderColor = p.over ? meter(h) : 'transparent';
+        $('sc'+i).textContent = p.penalty===0 ? '0' : '−'+p.penalty;
         $('mf'+i).style.width = meterPct(p.ratio||0).toFixed(1)+'%';
-        $('mf'+i).style.background = p.over ? '#ff5c5c' : '#4f7cff';
+        $('mf'+i).style.background = meter(h);
       } else {
-        cell.classList.add('empty'); cell.classList.remove('over');
-        $('sc'+i).textContent='–'; $('mf'+i).style.width='0%';
+        cell.classList.add('empty');
+        cell.style.background=''; cell.style.borderColor='';
+        $('sc'+i).textContent='—'; $('mf'+i).style.width='0%';
       }
     }
     requestAnimationFrame(refresh);
@@ -105,29 +110,38 @@
     return -1;
   }
 
-  const peer = new Peer('ss-'+room);
-  peer.on('open', ()=> $('stat').textContent = '待機中。スマホでQRを読み込んでください（部屋 '+room+'）');
-  peer.on('error', e=> $('stat').textContent = 'エラー: '+e.type+'（ページを再読み込みしてください）');
-  peer.on('connection', conn=>{
-    conn.on('data', d=>{
-      if(!d) return;
-      if(d.type==='join'){
-        const s=assignSlot(conn);
-        conn.send({type:'slot', slot:s});
-        $('stat').textContent = (s>=0? 'プレイヤー'+(s+1)+'が参加' : '満員のため参加できません');
-      } else if(d.type==='state'){
-        const s=connSlot.get(conn);
-        if(s!=null && players[s]){ players[s].penalty=d.penalty; players[s].ratio=d.ratio; players[s].over=d.over; }
-      }
-    });
-    conn.on('close', ()=>{ const s=connSlot.get(conn); if(s!=null){ players[s]=null; connSlot.delete(conn); } });
-  });
-
   $('count').addEventListener('change', e=>{ MAX=parseInt(e.target.value,10); buildGrid(); });
-  $('resetAll').addEventListener('click', ()=>{ players.forEach(p=>{ if(p) p.penalty=0; }); });
+  $('resetAll').addEventListener('click', ()=>{
+    players.forEach(p=>{ if(p) p.penalty=0; });           // 集計側を即0に
+    connSlot.forEach((slot,conn)=>{ if(conn&&conn.open) conn.send({type:'reset'}); }); // 各スマホにも通知
+  });
 
   buildGrid();
   requestAnimationFrame(refresh);
+
+  if(typeof Peer==='undefined'){
+    $('stat').textContent='同期ライブラリの読み込みに失敗しました。通信環境を変えて再読み込みしてください。';
+  } else {
+    try{
+      const peer=new Peer('ss-'+room);
+      peer.on('open', ()=> $('stat').textContent='待機中。スマホでQRを読み込んでください（部屋 '+room+'）');
+      peer.on('error', e=> $('stat').textContent='エラー: '+e.type+'（ページを再読み込みしてください）');
+      peer.on('connection', conn=>{
+        conn.on('data', d=>{
+          if(!d) return;
+          if(d.type==='join'){
+            const s=assignSlot(conn);
+            conn.send({type:'slot', slot:s});
+            $('stat').textContent = (s>=0? 'プレイヤー'+(s+1)+'が参加' : '満員のため参加できません');
+          } else if(d.type==='state'){
+            const s=connSlot.get(conn);
+            if(s!=null && players[s]){ players[s].penalty=d.penalty; players[s].ratio=d.ratio; players[s].over=d.over; }
+          }
+        });
+        conn.on('close', ()=>{ const s=connSlot.get(conn); if(s!=null){ players[s]=null; connSlot.delete(conn); } });
+      });
+    }catch(err){ $('stat').textContent='接続の初期化に失敗: '+err; }
+  }
 </script>
 </body>
 </html>
