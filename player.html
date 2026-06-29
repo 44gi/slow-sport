@@ -29,7 +29,7 @@
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v0.7</div>
+  <div id="version">v0.8</div>
   <div id="status" class="hidden"></div>
 
   <div id="game" class="hidden">
@@ -53,7 +53,13 @@
   const meter  = h => `hsl(${h},82%,60%)`;
 
   function meterPct(ratio){ const r=Math.max(0,Math.min(1,ratio)); return 100*Math.log(1+CURVE*r)/Math.log(1+CURVE); }
-  function showScore(){ $('pen').textContent = penalty===0 ? '0' : '−'+penalty; }
+  function fitScore(){
+    const el=$('pen'); let size=Math.min(240, el.clientWidth);
+    el.style.fontSize=size+'px';
+    let guard=0;
+    while(el.scrollWidth > el.clientWidth && size>44 && guard<80){ size-=6; el.style.fontSize=size+'px'; guard++; }
+  }
+  function showScore(){ $('pen').textContent = penalty===0 ? '0' : '−'+penalty; fitScore(); }
 
   // 失点ビープ（iOS/Android共通。開始操作内でctxを起こす）
   let actx=null;
@@ -117,6 +123,7 @@
   let wl=null;
   async function lock(){ try{ if('wakeLock' in navigator) wl=await navigator.wakeLock.request('screen'); }catch(e){} }
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') lock(); });
+  window.addEventListener('resize', ()=>{ if(!$('game').classList.contains('hidden')) fitScore(); });
 
   function connect(){
     if(!room) return;
