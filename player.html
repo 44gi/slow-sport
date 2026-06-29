@@ -9,31 +9,35 @@
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; font-family:-apple-system,sans-serif; background:#0f1117; color:#e8eaf0;
     min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
-    gap:20px; padding:20px; transition:background .18s; }
+    gap:18px; padding:20px; transition:background .18s; }
   #start { font-size:22px; padding:18px 36px; border:none; border-radius:14px; background:#4f7cff; color:#fff; font-weight:700; }
   #version { font-size:13px; color:#6b7180; }
   .hidden { display:none !important; }
   #status { font-size:13px; color:#cfd3de; background:rgba(0,0,0,.25); padding:6px 12px; border-radius:999px; }
-  #slotbadge { font-size:20px; font-weight:700; padding:6px 18px; border-radius:999px; background:rgba(0,0,0,.28); }
-  .scorebox { display:flex; flex-direction:column; align-items:center; }
-  .score { font-size:clamp(96px, 42vmin, 320px); font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; }
-  .score-lbl { font-size:20px; color:#cfd3de; margin-top:4px; letter-spacing:2px; }
-  #bar { width:86%; max-width:520px; height:44px; background:rgba(0,0,0,.3); border-radius:22px; overflow:hidden; }
-  #barfill { height:100%; width:0%; background:#4f7cff; border-radius:22px; }
+
+  /* 固定幅ステージ：名前・スコア・メーターをすべて同じ幅で縦に */
+  .stage { width:min(86vw,460px); display:flex; flex-direction:column; align-items:center;
+    gap:clamp(28px,8vh,72px); }
+  #slotbadge { width:100%; text-align:center; padding:12px 0; border-radius:14px;
+    background:rgba(0,0,0,.28); font-size:clamp(18px,3.6vh,26px); font-weight:700; }
+  #slotbadge .hint { display:block; font-size:11px; font-weight:400; color:#aeb4c2; margin-top:2px; }
+  .score { width:100%; text-align:center; white-space:nowrap;
+    font-size:clamp(96px,38vh,260px); font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; }
+  #bar { width:100%; height:46px; background:rgba(0,0,0,.3); border-radius:23px; overflow:hidden; }
+  #barfill { height:100%; width:0%; background:#4f7cff; border-radius:23px; }
 </style>
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v0.6</div>
+  <div id="version">v0.7</div>
   <div id="status" class="hidden"></div>
 
   <div id="game" class="hidden">
-    <div id="slotbadge" class="hidden">プレイヤー <span id="slotno">?</span></div>
-    <div class="scorebox">
+    <div class="stage">
+      <div id="slotbadge" class="hidden">プレイヤー <span id="slotno">?</span><span class="hint">タップで名前を変更</span></div>
       <div class="score" id="pen">0</div>
-      <div class="score-lbl">失点</div>
+      <div id="bar"><div id="barfill"></div></div>
     </div>
-    <div id="bar"><div id="barfill"></div></div>
   </div>
 
 <script>
@@ -41,9 +45,8 @@
   let baseline=9.8, penalty=0, latestMotion=0, lastHitTime=0, displayMotion=0;
   const $ = id => document.getElementById(id);
   const room = new URLSearchParams(location.search).get('room');
-  let conn=null, slot=null, hue=null;
+  let conn=null, slot=null, hue=null, playerName='';
 
-  // プレイヤー色（6色）。スコアボードと共通定義。
   const HUES=[210,145,30,280,340,52];
   const bg     = h => `hsl(${h},55%,16%)`;
   const bgOver = h => `hsl(${h},66%,34%)`;
@@ -52,6 +55,26 @@
   function meterPct(ratio){ const r=Math.max(0,Math.min(1,ratio)); return 100*Math.log(1+CURVE*r)/Math.log(1+CURVE); }
   function showScore(){ $('pen').textContent = penalty===0 ? '0' : '−'+penalty; }
 
+  // 失点ビープ（iOS/Android共通。開始操作内でctxを起こす）
+  let actx=null;
+  function ensureCtx(){ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }
+  function beep(){
+    if(!actx) return;
+    const t=actx.currentTime;
+    const o=actx.createOscillator(), g=actx.createGain();
+    o.type='square'; o.frequency.value=880;
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.3,t+0.005);
+    g.gain.linearRampToValueAtTime(0,t+0.09);
+    o.connect(g).connect(actx.destination);
+    o.start(t); o.stop(t+0.1);
+  }
+  function defaultName(){ return 'プレイヤー ' + (slot!=null && slot>=0 ? slot+1 : '?'); }
+  function updateBadge(){
+    const label = playerName || defaultName();
+    $('slotbadge').innerHTML = label + '<span class="hint">タップで名前を変更</span>';
+  }
+
   function handleMotion(e){
     const a=e.accelerationIncludingGravity; if(!a||a.x===null) return;
     const mag=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z);
@@ -59,7 +82,10 @@
     const motion=Math.abs(mag-baseline);
     latestMotion=motion;
     const now=performance.now();
-    if(motion>THRESHOLD && now-lastHitTime>COOLDOWN_MS){ penalty++; lastHitTime=now; showScore(); }
+    if(motion>THRESHOLD && now-lastHitTime>COOLDOWN_MS){
+      penalty++; lastHitTime=now; showScore();
+      beep();
+    }
   }
 
   function render(){
@@ -78,18 +104,32 @@
 
   function setStatus(t){ $('status').textContent=t; $('status').classList.remove('hidden'); }
 
+  // 名前編集
+  $('slotbadge').addEventListener('click', ()=>{
+    const v = prompt('プレイヤー名を入力', playerName || '');
+    if(v===null) return;
+    playerName = v.trim();
+    updateBadge();
+    if(conn && conn.open) conn.send({type:'name', name: playerName || defaultName()});
+  });
+
+  // スリープ防止（復帰時に再取得）
+  let wl=null;
+  async function lock(){ try{ if('wakeLock' in navigator) wl=await navigator.wakeLock.request('screen'); }catch(e){} }
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') lock(); });
+
   function connect(){
     if(!room) return;
     setStatus('スコアボードに接続中…');
     const peer=new Peer();
     peer.on('open', ()=>{
       conn=peer.connect('ss-'+room,{reliable:false});
-      conn.on('open', ()=>{ setStatus('接続済み'); conn.send({type:'join'}); });
+      conn.on('open', ()=>{ setStatus('接続済み'); conn.send({type:'join'}); if(playerName) conn.send({type:'name',name:playerName}); });
       conn.on('data', d=>{
         if(!d) return;
         if(d.type==='slot'){
           slot=d.slot;
-          if(slot>=0){ hue=HUES[slot % HUES.length]; $('slotno').textContent=slot+1; $('slotbadge').classList.remove('hidden'); }
+          if(slot>=0){ hue=HUES[slot%HUES.length]; updateBadge(); $('slotbadge').classList.remove('hidden'); }
         } else if(d.type==='reset'){ penalty=0; showScore(); }
       });
       conn.on('close', ()=> setStatus('切断されました。再読み込みしてください'));
@@ -99,12 +139,13 @@
   }
 
   async function start(){
+    ensureCtx();   // 最初の操作内で音声を起こす（iOS必須）
     if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
       try{ const r=await DeviceMotionEvent.requestPermission(); if(r!=='granted'){ alert('センサーが許可されませんでした'); return; } }
       catch(err){ alert('許可の取得に失敗: '+err); return; }
     }
     window.addEventListener('devicemotion', handleMotion);
-    try{ if('wakeLock' in navigator) await navigator.wakeLock.request('screen'); }catch(e){}
+    lock();
     $('start').classList.add('hidden'); $('version').classList.add('hidden');
     $('game').classList.remove('hidden');
     showScore();
