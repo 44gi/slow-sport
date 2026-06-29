@@ -29,7 +29,7 @@
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v0.9</div>
+  <div id="version">v1.0</div>
   <div id="status" class="hidden"></div>
   <div id="endlabel" class="hidden">終了</div>
 
@@ -49,7 +49,7 @@
   const room = new URLSearchParams(location.search).get('room');
   let conn=null, slot=null, hue=null, playerName='';
 
-  const HUES=[210,145,30,280,340,52];
+  const HUES=[210,145,30,280,340,52,180,255];
   const bg     = h => `hsl(${h},55%,16%)`;
   const bgOver = h => `hsl(${h},66%,34%)`;
   const meter  = h => `hsl(${h},82%,60%)`;

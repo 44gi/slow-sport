@@ -42,9 +42,9 @@
 </head>
 <body>
   <header>
-    <h1>スコアボード</h1><span class="v">v0.9</span>
+    <h1>スコアボード</h1><span class="v">v1.0</span>
     <div class="controls">
-      <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option></select></label>
+      <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option></select></label>
       <label class="v">時間 <select id="mins"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>分</label>
       <button id="startMatch">試合開始</button>
       <button id="endMatch" disabled>試合終了</button>
@@ -67,7 +67,7 @@
   const $ = id => document.getElementById(id);
   let MAX = 6;
 
-  const HUES=[210,145,30,280,340,52];
+  const HUES=[210,145,30,280,340,52,180,255];
   const bg     = h => `hsl(${h},55%,16%)`;
   const bgOver = h => `hsl(${h},66%,34%)`;
   const meter  = h => `hsl(${h},82%,60%)`;
@@ -86,7 +86,7 @@
 
   function buildGrid(){
     const g=$('grid'); g.innerHTML='';
-    const cols = MAX<=2 ? 1 : (MAX<=6 ? 2 : 3);
+    const cols = MAX<=2 ? 1 : (MAX<=6 ? 2 : 4);
     const rows = Math.ceil(MAX/cols);
     g.style.gridTemplateColumns=`repeat(${cols},1fr)`;
     g.style.gridTemplateRows=`repeat(${rows},1fr)`;
