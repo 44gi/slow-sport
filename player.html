@@ -14,22 +14,18 @@
   #version { font-size:13px; color:#6b7180; }
   .hidden { display:none !important; }
   #status { font-size:13px; color:#cfd3de; background:rgba(0,0,0,.25); padding:6px 12px; border-radius:999px; }
-
-  /* 固定幅ステージ：名前・スコア・メーターをすべて同じ幅で縦に */
-  .stage { width:min(86vw,460px); display:flex; flex-direction:column; align-items:center;
-    gap:clamp(28px,8vh,72px); }
+  .stage { width:min(86vw,460px); display:flex; flex-direction:column; align-items:center; gap:clamp(28px,8vh,72px); }
   #slotbadge { width:100%; text-align:center; padding:12px 0; border-radius:14px;
     background:rgba(0,0,0,.28); font-size:clamp(18px,3.6vh,26px); font-weight:700; }
   #slotbadge .hint { display:block; font-size:11px; font-weight:400; color:#aeb4c2; margin-top:2px; }
-  .score { width:100%; text-align:center; white-space:nowrap;
-    font-size:clamp(96px,38vh,260px); font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; }
+  .score { width:100%; text-align:center; white-space:nowrap; font-weight:900; line-height:.9; font-variant-numeric:tabular-nums; }
   #bar { width:100%; height:46px; background:rgba(0,0,0,.3); border-radius:23px; overflow:hidden; }
   #barfill { height:100%; width:0%; background:#4f7cff; border-radius:23px; }
 </style>
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v0.8</div>
+  <div id="version">v0.9</div>
   <div id="status" class="hidden"></div>
 
   <div id="game" class="hidden">
@@ -41,8 +37,9 @@
   </div>
 
 <script>
-  const ALPHA=0.9, THRESHOLD=1.0, COOLDOWN_MS=200, SMOOTHING=0.2, CURVE=9;
+  const ALPHA=0.9, THRESHOLD=1.0, COOLDOWN_MS=200, SMOOTHING=0.2, CURVE=9, DEADZONE=0.2;
   let baseline=9.8, penalty=0, latestMotion=0, lastHitTime=0, displayMotion=0;
+  let phase='idle', countdownN=0;
   const $ = id => document.getElementById(id);
   const room = new URLSearchParams(location.search).get('room');
   let conn=null, slot=null, hue=null, playerName='';
@@ -52,52 +49,50 @@
   const bgOver = h => `hsl(${h},66%,34%)`;
   const meter  = h => `hsl(${h},82%,60%)`;
 
+  const isActive = () => (phase==='idle' || phase==='running');
   function meterPct(ratio){ const r=Math.max(0,Math.min(1,ratio)); return 100*Math.log(1+CURVE*r)/Math.log(1+CURVE); }
+
   function fitScore(){
     const el=$('pen'); let size=Math.min(240, el.clientWidth);
     el.style.fontSize=size+'px';
     let guard=0;
     while(el.scrollWidth > el.clientWidth && size>44 && guard<80){ size-=6; el.style.fontSize=size+'px'; guard++; }
   }
-  function showScore(){ $('pen').textContent = penalty===0 ? '0' : '−'+penalty; fitScore(); }
+  function refreshScoreText(){
+    if(phase==='countdown') $('pen').textContent = String(countdownN);
+    else $('pen').textContent = penalty===0 ? '0' : '−'+penalty;
+    fitScore();
+  }
 
-  // 失点ビープ（iOS/Android共通。開始操作内でctxを起こす）
+  // 失点ビープ
   let actx=null;
   function ensureCtx(){ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }
   function beep(){
     if(!actx) return;
-    const t=actx.currentTime;
-    const o=actx.createOscillator(), g=actx.createGain();
+    const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
     o.type='square'; o.frequency.value=880;
-    g.gain.setValueAtTime(0,t);
-    g.gain.linearRampToValueAtTime(0.3,t+0.005);
-    g.gain.linearRampToValueAtTime(0,t+0.09);
-    o.connect(g).connect(actx.destination);
-    o.start(t); o.stop(t+0.1);
-  }
-  function defaultName(){ return 'プレイヤー ' + (slot!=null && slot>=0 ? slot+1 : '?'); }
-  function updateBadge(){
-    const label = playerName || defaultName();
-    $('slotbadge').innerHTML = label + '<span class="hint">タップで名前を変更</span>';
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.3,t+0.005); g.gain.linearRampToValueAtTime(0,t+0.09);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t+0.1);
   }
 
   function handleMotion(e){
     const a=e.accelerationIncludingGravity; if(!a||a.x===null) return;
     const mag=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z);
     baseline=ALPHA*baseline+(1-ALPHA)*mag;
-    const motion=Math.abs(mag-baseline);
+    let motion=Math.abs(mag-baseline);
+    if(motion < DEADZONE) motion = 0;     // 机置きのプルプルを無視
     latestMotion=motion;
     const now=performance.now();
-    if(motion>THRESHOLD && now-lastHitTime>COOLDOWN_MS){
-      penalty++; lastHitTime=now; showScore();
-      beep();
+    if(isActive() && motion>THRESHOLD && now-lastHitTime>COOLDOWN_MS){
+      penalty++; lastHitTime=now; refreshScoreText(); beep();
     }
   }
 
   function render(){
-    displayMotion += (latestMotion-displayMotion)*SMOOTHING;
+    const target = isActive() ? latestMotion : 0;       // 非アクティブ時はメーター0
+    displayMotion += (target - displayMotion)*SMOOTHING;
     $('barfill').style.width = meterPct(displayMotion/THRESHOLD).toFixed(1)+'%';
-    const over = latestMotion>THRESHOLD;
+    const over = isActive() && latestMotion>THRESHOLD;
     if(hue===null){
       document.body.style.background = over ? '#5c1a1a' : '#0f1117';
       $('barfill').style.background = over ? '#ff5c5c' : '#4f7cff';
@@ -109,21 +104,26 @@
   }
 
   function setStatus(t){ $('status').textContent=t; $('status').classList.remove('hidden'); }
+  function defaultName(){ return 'プレイヤー ' + (slot!=null && slot>=0 ? slot+1 : '?'); }
+  function updateBadge(){ $('slotbadge').innerHTML = (playerName||defaultName()) + '<span class="hint">タップで名前を変更</span>'; }
 
-  // 名前編集
   $('slotbadge').addEventListener('click', ()=>{
     const v = prompt('プレイヤー名を入力', playerName || '');
     if(v===null) return;
-    playerName = v.trim();
-    updateBadge();
+    playerName = v.trim(); updateBadge();
     if(conn && conn.open) conn.send({type:'name', name: playerName || defaultName()});
   });
 
-  // スリープ防止（復帰時に再取得）
   let wl=null;
   async function lock(){ try{ if('wakeLock' in navigator) wl=await navigator.wakeLock.request('screen'); }catch(e){} }
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') lock(); });
   window.addEventListener('resize', ()=>{ if(!$('game').classList.contains('hidden')) fitScore(); });
+
+  function applyPhase(p, n){
+    phase = p; countdownN = n||0;
+    if(phase==='countdown') penalty=0;     // カウントダウン中は0表示
+    refreshScoreText();
+  }
 
   function connect(){
     if(!room) return;
@@ -134,19 +134,23 @@
       conn.on('open', ()=>{ setStatus('接続済み'); conn.send({type:'join'}); if(playerName) conn.send({type:'name',name:playerName}); });
       conn.on('data', d=>{
         if(!d) return;
-        if(d.type==='slot'){
-          slot=d.slot;
-          if(slot>=0){ hue=HUES[slot%HUES.length]; updateBadge(); $('slotbadge').classList.remove('hidden'); }
-        } else if(d.type==='reset'){ penalty=0; showScore(); }
+        if(d.type==='slot'){ slot=d.slot; if(slot>=0){ hue=HUES[slot%HUES.length]; updateBadge(); $('slotbadge').classList.remove('hidden'); } }
+        else if(d.type==='reset'){ penalty=0; refreshScoreText(); }
+        else if(d.type==='phase'){ applyPhase(d.phase, d.n); }
       });
       conn.on('close', ()=> setStatus('切断されました。再読み込みしてください'));
     });
     peer.on('error', e=> setStatus('接続エラー: '+e.type+'（部屋コードを確認）'));
-    setInterval(()=>{ if(conn&&conn.open) conn.send({type:'state', penalty, ratio: latestMotion/THRESHOLD, over: latestMotion>THRESHOLD}); }, 100);
+    setInterval(()=>{
+      if(conn&&conn.open){
+        const act=isActive();
+        conn.send({type:'state', penalty, ratio: act? latestMotion/THRESHOLD : 0, over: act && latestMotion>THRESHOLD});
+      }
+    }, 100);
   }
 
   async function start(){
-    ensureCtx();   // 最初の操作内で音声を起こす（iOS必須）
+    ensureCtx();
     if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
       try{ const r=await DeviceMotionEvent.requestPermission(); if(r!=='granted'){ alert('センサーが許可されませんでした'); return; } }
       catch(err){ alert('許可の取得に失敗: '+err); return; }
@@ -155,7 +159,7 @@
     lock();
     $('start').classList.add('hidden'); $('version').classList.add('hidden');
     $('game').classList.remove('hidden');
-    showScore();
+    refreshScoreText();
     requestAnimationFrame(render);
     connect();
   }

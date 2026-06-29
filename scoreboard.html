@@ -10,7 +10,6 @@
   html,body { height:100%; }
   body { margin:0; font-family:-apple-system,sans-serif; background:#0f1117; color:#e8eaf0;
     height:100vh; display:flex; flex-direction:column; overflow:hidden; }
-
   header { display:flex; align-items:center; gap:14px; padding:8px 16px; border-bottom:1px solid #232838; flex:none; }
   header h1 { font-size:15px; margin:0; font-weight:700; white-space:nowrap; }
   header .v { font-size:11px; color:#6b7180; }
@@ -20,27 +19,22 @@
   #startMatch:disabled { opacity:.5; }
   #endMatch { background:#7a1f2a; border-color:#9b2a3a; font-weight:700; }
   #endMatch:disabled { opacity:.5; }
-
-  #timer { flex:1; text-align:center; font-size:clamp(40px,9vh,104px); font-weight:900;
-    font-variant-numeric:tabular-nums; letter-spacing:2px; line-height:1; }
+  #timer { flex:1; text-align:center; font-size:clamp(40px,9vh,104px); font-weight:900; font-variant-numeric:tabular-nums; letter-spacing:2px; line-height:1; }
   #timer.warn { color:#ffb84d; }
   #timer.done { color:#ff5c5c; }
-
+  #timer.count { color:#4f9bff; font-size:clamp(56px,12vh,150px); }
   .join { display:flex; align-items:center; gap:12px; }
   .join img { width:84px; height:84px; border-radius:8px; background:#fff; }
   .join .code { font-size:12px; color:#9aa0b0; }
   .join .code b { color:#e8eaf0; font-size:20px; letter-spacing:2px; }
   .join .url { font-size:10px; color:#6b7180; word-break:break-all; max-width:200px; }
-
   #stat { font-size:11px; color:#6b7180; padding:2px 16px; flex:none; }
-
   .grid { flex:1; min-height:0; display:grid; gap:10px; padding:12px; }
   .cell { background:#161a26; border:2px solid #232838; border-radius:14px;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1.2vh; padding:10px;
     transition:background .12s, border-color .12s; overflow:hidden; min-height:0; }
   .cell.empty { opacity:.4; }
-  .cell .who { font-size:clamp(14px,2.6vh,26px); font-weight:700; max-width:90%; overflow:hidden;
-    text-overflow:ellipsis; white-space:nowrap; }
+  .cell .who { font-size:clamp(14px,2.6vh,26px); font-weight:700; max-width:90%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cell .score { font-size:clamp(44px,11vh,150px); font-weight:900; line-height:.92; font-variant-numeric:tabular-nums; }
   .cell .mbar { width:78%; height:1.8vh; min-height:10px; background:rgba(0,0,0,.35); border-radius:999px; overflow:hidden; }
   .cell .mfill { height:100%; width:0%; border-radius:999px; }
@@ -48,13 +42,14 @@
 </head>
 <body>
   <header>
-    <h1>スコアボード</h1><span class="v">v0.8</span>
+    <h1>スコアボード</h1><span class="v">v0.9</span>
     <div class="controls">
       <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option></select></label>
       <label class="v">時間 <select id="mins"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>分</label>
       <button id="startMatch">試合開始</button>
       <button id="endMatch" disabled>試合終了</button>
       <button id="resetAll">リセット</button>
+      <button id="testWhistle">ホイッスル</button>
     </div>
     <div id="timer">3:00</div>
     <div class="join">
@@ -80,12 +75,12 @@
   const CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const room=Array.from({length:5},()=>CH[Math.floor(Math.random()*CH.length)]).join('');
   const joinUrl=location.href.replace(/scoreboard\.html.*$/,'').replace(/\/?$/,'/')+'player.html?room='+room;
-  $('code').textContent=room;
-  $('url').textContent=joinUrl;
+  $('code').textContent=room; $('url').textContent=joinUrl;
   $('qr').src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(joinUrl);
 
   const players=[];
   const connSlot=new Map();
+  let phase='idle';   // idle | countdown | running | ended
 
   function meterPct(r){ const x=Math.max(0,Math.min(1,r)); return 100*Math.log(1+9*x)/Math.log(1+9); }
 
@@ -104,7 +99,6 @@
       g.appendChild(c);
     }
   }
-
   function refresh(){
     for(let i=0;i<MAX;i++){
       const p=players[i], cell=$('cell'+i); if(!cell) continue;
@@ -129,61 +123,68 @@
     for(let i=0;i<MAX;i++){ if(!players[i]){ players[i]={penalty:0,ratio:0,over:false,name:null}; connSlot.set(conn,i); return i; } }
     return -1;
   }
-  function resetScores(){
-    players.forEach(p=>{ if(p) p.penalty=0; });
-    connSlot.forEach((slot,conn)=>{ if(conn&&conn.open) conn.send({type:'reset'}); });
-  }
+  function broadcast(msg){ connSlot.forEach((slot,conn)=>{ if(conn&&conn.open) conn.send(msg); }); }
+  function resetScores(){ players.forEach(p=>{ if(p) p.penalty=0; }); broadcast({type:'reset'}); }
+  function setPhase(p,n){ phase=p; broadcast({type:'phase', phase:p, n:n||0}); }
 
-  // ---- ホイッスル音（Web Audio・強め） ----
+  // ---- ホイッスル＆ビープ ----
   let actx=null;
   function ensureCtx(){ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }
   function whistle(dur){
     ensureCtx();
-    const t=actx.currentTime;
-    const master=actx.createGain();
+    const t=actx.currentTime, master=actx.createGain();
     master.gain.setValueAtTime(0.0001,t);
-    master.gain.linearRampToValueAtTime(0.85,t+0.015);          // 鋭い立ち上がり
+    master.gain.linearRampToValueAtTime(0.85,t+0.015);
     master.gain.setValueAtTime(0.85,t+Math.max(0.04,dur-0.06));
     master.gain.exponentialRampToValueAtTime(0.001,t+dur);
     master.connect(actx.destination);
-
-    // 速いビブラート（笛のトリル）
     const lfo=actx.createOscillator(), lfoG=actx.createGain();
-    lfo.type='sine'; lfo.frequency.value=30; lfoG.gain.value=260;
-    lfo.connect(lfoG); lfo.start(t); lfo.stop(t+dur);
-
-    // 倍音を重ねて厚く鋭い音に
+    lfo.type='sine'; lfo.frequency.value=30; lfoG.gain.value=260; lfo.connect(lfoG); lfo.start(t); lfo.stop(t+dur);
     [[2500,0.42,'square'],[3750,0.20,'triangle'],[5000,0.10,'sine']].forEach(([f,amp,type])=>{
       const o=actx.createOscillator(), g=actx.createGain();
-      o.type=type; o.frequency.value=f; lfoG.connect(o.frequency);
-      g.gain.value=amp; o.connect(g).connect(master);
+      o.type=type; o.frequency.value=f; lfoG.connect(o.frequency); g.gain.value=amp; o.connect(g).connect(master);
       o.start(t); o.stop(t+dur);
     });
-
-    // 息のノイズ成分（バンドパス）
     const buf=actx.createBuffer(1, Math.ceil(actx.sampleRate*dur), actx.sampleRate);
     const d=buf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
     const nb=actx.createBufferSource(); nb.buffer=buf;
     const bp=actx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=3000; bp.Q.value=5;
-    const ng=actx.createGain(); ng.gain.value=0.12;
-    nb.connect(bp).connect(ng).connect(master);
+    const ng=actx.createGain(); ng.gain.value=0.12; nb.connect(bp).connect(ng).connect(master);
     nb.start(t); nb.stop(t+dur);
   }
   function whistleStart(){ whistle(0.9); }
   function whistleEnd(){ whistle(0.24); setTimeout(()=>whistle(0.24),300); setTimeout(()=>whistle(0.7),620); }
+  function tick(){ ensureCtx(); const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+    o.type='sine'; o.frequency.value=1200; g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.4,t+0.005); g.gain.linearRampToValueAtTime(0,t+0.12);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t+0.13); }
 
-  // ---- タイマー ----
-  let remain=180, timerId=null, running=false;
+  // ---- 進行制御 ----
+  let remain=180, timerId=null;
   function fmt(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
   function showTimer(){ $('timer').textContent=fmt(remain); }
-  function setMinsFromSelect(){ if(!running){ remain=parseInt($('mins').value,10)*60; $('timer').className=''; showTimer(); } }
+  function setMinsFromSelect(){ if(phase==='idle'||phase==='ended'){ remain=parseInt($('mins').value,10)*60; phase='idle'; $('timer').className=''; showTimer(); } }
+
   function startMatch(){
     ensureCtx();
+    resetScores();
+    setPhase('countdown',5);
+    $('timer').className='count'; $('timer').textContent='5';
+    tick();
+    $('startMatch').disabled=true; $('endMatch').disabled=false; $('mins').disabled=true;
+    let n=5;
+    clearInterval(timerId);
+    timerId=setInterval(()=>{
+      n--;
+      if(n>0){ setPhase('countdown',n); $('timer').textContent=String(n); tick(); }
+      else { clearInterval(timerId); beginRunning(); }
+    },1000);
+  }
+  function beginRunning(){
     remain=parseInt($('mins').value,10)*60;
     resetScores();
+    setPhase('running',0);
     $('timer').className=''; showTimer();
     whistleStart();
-    running=true; $('startMatch').disabled=true; $('endMatch').disabled=false; $('mins').disabled=true;
     clearInterval(timerId);
     timerId=setInterval(()=>{
       remain--;
@@ -193,9 +194,17 @@
   }
   function endMatch(){
     clearInterval(timerId);
-    running=false; remain=0;                 // 以降スコア更新を凍結
+    setPhase('ended',0); remain=0;
     $('timer').className='done'; $('timer').textContent='終了';
     whistleEnd();
+    $('startMatch').disabled=false; $('endMatch').disabled=true; $('mins').disabled=false;
+  }
+  function resetMatch(){
+    clearInterval(timerId);
+    resetScores();
+    remain=parseInt($('mins').value,10)*60;
+    setPhase('idle',0);
+    $('timer').className=''; showTimer();
     $('startMatch').disabled=false; $('endMatch').disabled=true; $('mins').disabled=false;
   }
 
@@ -203,7 +212,8 @@
   $('mins').addEventListener('change', setMinsFromSelect);
   $('startMatch').addEventListener('click', startMatch);
   $('endMatch').addEventListener('click', endMatch);
-  $('resetAll').addEventListener('click', resetScores);
+  $('resetAll').addEventListener('click', resetMatch);
+  $('testWhistle').addEventListener('click', ()=>{ ensureCtx(); whistleStart(); });
 
   buildGrid();
   setMinsFromSelect();
@@ -222,11 +232,12 @@
           if(d.type==='join'){
             const s=assignSlot(conn);
             conn.send({type:'slot', slot:s});
+            conn.send({type:'phase', phase:phase, n:0});   // 現在の進行状態を通知
             $('stat').textContent = (s>=0? 'プレイヤー'+(s+1)+'が参加' : '満員のため参加できません');
           } else if(d.type==='state'){
             const s=connSlot.get(conn);
             if(s!=null && players[s]){
-              if(running) players[s].penalty=d.penalty;   // 試合中のみ加点を反映（終了後は凍結）
+              if(phase==='idle' || phase==='running') players[s].penalty=d.penalty;  // 試合前と試合中のみ反映
               players[s].ratio=d.ratio; players[s].over=d.over;
             }
           } else if(d.type==='name'){

@@ -36,7 +36,7 @@
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v0.7</div>
+  <div id="version">v0.9</div>
 
   <div id="game" class="hidden">
     <div class="penalty"><span id="pen">0</span><small>失点</small></div>
@@ -65,6 +65,11 @@
         <div class="hint">大きいほど反応が速く、小さいほど滑らか</div>
       </div>
       <div class="ctl">
+        <div class="ctl-head"><span>不感帯（デッドゾーン）</span><b id="dzVal">0.20</b></div>
+        <input id="dz" type="range" min="0" max="1" step="0.02" value="0.2">
+        <div class="hint">この値未満の動きは0扱い（机置きのプルプル防止）</div>
+      </div>
+      <div class="ctl">
         <div class="ctl-head"><span>メーター湾曲度</span><b id="curveVal">9</b></div>
         <input id="curve" type="range" min="1" max="20" step="1" value="9">
         <div class="hint">大きいほどしきい値付近で伸びが鈍り“ギリギリ感”が出る</div>
@@ -77,7 +82,7 @@
 
 <script>
   let baseline = 9.8;
-  let ALPHA = 0.9, THRESHOLD = 1.0, COOLDOWN_MS = 200, SMOOTHING = 0.2, CURVE = 9;
+  let ALPHA = 0.9, THRESHOLD = 1.0, COOLDOWN_MS = 200, SMOOTHING = 0.2, CURVE = 9, DEADZONE = 0.2;
   let penalty = 0;
   let latestMotion = 0, lastRaw = {x:0,y:0,z:0}, lastHitTime = 0;
   let displayMotion = 0;
@@ -94,7 +99,8 @@
     if (!a || a.x === null) return;
     const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
     baseline = ALPHA * baseline + (1 - ALPHA) * mag;
-    const motion = Math.abs(mag - baseline);
+    let motion = Math.abs(mag - baseline);
+    if (motion < DEADZONE) motion = 0;
     latestMotion = motion; lastRaw = a;
     const now = performance.now();
     if (motion > THRESHOLD && now - lastHitTime > COOLDOWN_MS) {
@@ -135,6 +141,7 @@
   $('cd').addEventListener('input', e => { COOLDOWN_MS = parseInt(e.target.value,10); $('cdVal').textContent = COOLDOWN_MS; });
   $('sm').addEventListener('input', e => { SMOOTHING = parseFloat(e.target.value); $('smVal').textContent = SMOOTHING.toFixed(2); });
   $('curve').addEventListener('input', e => { CURVE = parseInt(e.target.value,10); $('curveVal').textContent = CURVE; });
+  $('dz').addEventListener('input', e => { DEADZONE = parseFloat(e.target.value); $('dzVal').textContent = DEADZONE.toFixed(2); });
   $('reset').addEventListener('click', () => { penalty = 0; $('pen').textContent = 0; });
 </script>
 </body>
