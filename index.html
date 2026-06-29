@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>動き検知テスト</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; font-family: -apple-system, sans-serif;
+    background: #0f1117; color: #e8eaf0;
+    height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; padding: 20px;
+    transition: background 0.15s;
+  }
+  body.over { background: #5c1a1a; }
+  #start {
+    font-size: 22px; padding: 18px 36px; border: none; border-radius: 14px;
+    background: #4f7cff; color: #fff; font-weight: 700;
+  }
+  .hidden { display: none !important; }
+  .penalty { font-size: 88px; font-weight: 800; line-height: 1; }
+  .penalty small { font-size: 18px; font-weight: 500; color: #9aa0b0; display: block; margin-top: 6px; }
+  .row { font-size: 15px; color: #9aa0b0; font-variant-numeric: tabular-nums; }
+  .row b { color: #e8eaf0; font-size: 19px; }
+  #bar { width: 80%; height: 22px; background: #232838; border-radius: 11px; overflow: hidden; }
+  #barfill { height: 100%; width: 0%; background: #4f7cff; transition: width 0.05s, background 0.05s; }
+  .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .controls label { font-size: 14px; color: #9aa0b0; }
+  input[type=range] { width: 180px; }
+  #reset { padding: 8px 16px; border: 1px solid #3a4054; border-radius: 8px; background: transparent; color: #9aa0b0; }
+</style>
+</head>
+<body>
+  <button id="start">タップして計測開始</button>
+
+  <div id="game" class="hidden">
+    <div class="penalty"><span id="pen">0</span><small>失点</small></div>
+    <div id="bar"><div id="barfill"></div></div>
+    <div class="row">いまの動きの強さ: <b id="motion">0.0</b></div>
+    <div class="row">しきい値: <b id="thVal">4.0</b></div>
+    <div class="controls">
+      <label>しきい値 <input id="th" type="range" min="1" max="12" step="0.5" value="4"></label>
+      <button id="reset">失点リセット</button>
+    </div>
+    <div class="row" id="raw">x: 0  y: 0  z: 0</div>
+  </div>
+
+<script>
+  let baseline = 9.8;
+  const ALPHA = 0.9;
+  let THRESHOLD = 4.0;
+  let penalty = 0, cooldown = 0;
+
+  const $ = id => document.getElementById(id);
+
+  function handleMotion(e) {
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x === null) return;
+    const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+    baseline = ALPHA * baseline + (1 - ALPHA) * mag;
+    const motion = Math.abs(mag - baseline);
+
+    if (motion > THRESHOLD && cooldown <= 0) {
+      penalty += 1;
+      cooldown = 10;
+      $('pen').textContent = penalty;
+    }
+    if (cooldown > 0) cooldown--;
+
+    $('motion').textContent = motion.toFixed(1);
+    $('raw').textContent = `x: ${a.x.toFixed(1)}  y: ${a.y.toFixed(1)}  z: ${a.z.toFixed(1)}`;
+    const pct = Math.min(100, (motion / THRESHOLD) * 100);
+    $('barfill').style.width = pct + '%';
+    const over = motion > THRESHOLD;
+    $('barfill').style.background = over ? '#ff5c5c' : '#4f7cff';
+    document.body.classList.toggle('over', over);
+  }
+
+  async function start() {
+    // iOSはユーザー操作内での許可取得が必須
+    if (typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function') {
+      try {
+        const res = await DeviceMotionEvent.requestPermission();
+        if (res !== 'granted') { alert('センサーの利用が許可されませんでした'); return; }
+      } catch (err) { alert('許可の取得に失敗: ' + err); return; }
+    }
+    window.addEventListener('devicemotion', handleMotion);
+
+    // 画面スリープ防止（iOS 16.4+）
+    try {
+      if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
+    } catch (e) {}
+
+    $('start').classList.add('hidden');
+    $('game').classList.remove('hidden');
+  }
+
+  $('start').addEventListener('click', start);
+  $('th').addEventListener('input', e => {
+    THRESHOLD = parseFloat(e.target.value);
+    $('thVal').textContent = THRESHOLD.toFixed(1);
+  });
+  $('reset').addEventListener('click', () => { penalty = 0; $('pen').textContent = 0; });
+</script>
+</body>
+</html>
