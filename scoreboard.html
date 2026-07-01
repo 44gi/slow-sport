@@ -42,7 +42,7 @@
 </head>
 <body>
   <header>
-    <h1>スコアボード</h1><span class="v">v1.2</span>
+    <h1>スコアボード</h1><span class="v">v1.3</span>
     <div class="controls">
       <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option></select></label>
       <label class="v">時間 <select id="mins"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select>分</label>
@@ -170,9 +170,24 @@
   // ---- BGM ----
   const bgm=$('bgm');
   bgm.volume=parseFloat($('vol').value);
-  function bgmStart(){ try{ bgm.currentTime=0; const p=bgm.play(); if(p&&p.catch) p.catch(()=>{}); }catch(e){} }
+  function bgmPrime(){   // ユーザー操作中に一度だけ再生解除
+    try{
+      bgm.muted=true;
+      const p=bgm.play();
+      if(p&&p.then) p.then(()=>{ bgm.pause(); bgm.currentTime=0; bgm.muted=false; }).catch(()=>{ bgm.muted=false; });
+      else { bgm.pause(); bgm.currentTime=0; bgm.muted=false; }
+    }catch(e){}
+  }
+  function bgmStart(){
+    try{
+      bgm.currentTime=0;
+      const p=bgm.play();
+      if(p&&p.catch) p.catch(err=>{ $('stat').textContent='BGM再生できません: '+(err&&err.name||err)+'（ファイル形式かブラウザ設定を確認）'; });
+    }catch(e){}
+  }
   function bgmStop(){ try{ bgm.pause(); }catch(e){} }
   $('vol').addEventListener('input', e=>{ bgm.volume=parseFloat(e.target.value); });
+  bgm.addEventListener('error', ()=>{ $('stat').textContent='BGMファイルを読み込めません（bgm.m4a の場所・名前を確認）'; });
 
   // ---- 進行制御 ----
   let remain=120, timerId=null;
@@ -182,6 +197,7 @@
 
   function startMatch(){
     ensureCtx();
+    bgmPrime();                 // ユーザー操作中にBGMを解除しておく
     resetScores();
     setPhase('countdown',5);
     $('timer').className='count'; $('timer').textContent='5';
