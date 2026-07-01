@@ -42,16 +42,16 @@
 </head>
 <body>
   <header>
-    <h1>スコアボード</h1><span class="v">v1.0</span>
+    <h1>スコアボード</h1><span class="v">v1.1</span>
     <div class="controls">
       <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option></select></label>
-      <label class="v">時間 <select id="mins"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>分</label>
+      <label class="v">時間 <select id="mins"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select>分</label>
       <button id="startMatch">試合開始</button>
       <button id="endMatch" disabled>試合終了</button>
       <button id="resetAll">リセット</button>
       <button id="testWhistle">ホイッスル</button>
     </div>
-    <div id="timer">3:00</div>
+    <div id="timer">2:00</div>
     <div class="join">
       <div>
         <div class="code">部屋 <b id="code">----</b></div>
@@ -120,7 +120,14 @@
   }
 
   function assignSlot(conn){
-    for(let i=0;i<MAX;i++){ if(!players[i]){ players[i]={penalty:0,ratio:0,over:false,name:null}; connSlot.set(conn,i); return i; } }
+    const occupied = new Set(connSlot.values());   // 現在接続中のスロット
+    for(let i=0;i<MAX;i++){
+      if(!occupied.has(i)){
+        players[i]={penalty:0,ratio:0,over:false,name:null};   // 新規参加で上書き（前のスコアは消える）
+        connSlot.set(conn,i);
+        return i;
+      }
+    }
     return -1;
   }
   function broadcast(msg){ connSlot.forEach((slot,conn)=>{ if(conn&&conn.open) conn.send(msg); }); }
@@ -159,7 +166,7 @@
     o.connect(g).connect(actx.destination); o.start(t); o.stop(t+0.13); }
 
   // ---- 進行制御 ----
-  let remain=180, timerId=null;
+  let remain=120, timerId=null;
   function fmt(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
   function showTimer(){ $('timer').textContent=fmt(remain); }
   function setMinsFromSelect(){ if(phase==='idle'||phase==='ended'){ remain=parseInt($('mins').value,10)*60; phase='idle'; $('timer').className=''; showTimer(); } }
@@ -184,12 +191,13 @@
     resetScores();
     setPhase('running',0);
     $('timer').className=''; showTimer();
+    broadcast({type:'time', remain});
     whistleStart();
     clearInterval(timerId);
     timerId=setInterval(()=>{
       remain--;
       if(remain<=10 && remain>0) $('timer').className='warn';
-      if(remain<=0){ endMatch(); } else showTimer();
+      if(remain<=0){ endMatch(); } else { showTimer(); broadcast({type:'time', remain}); }
     },1000);
   }
   function endMatch(){
@@ -245,7 +253,11 @@
             if(s!=null && players[s]) players[s].name=d.name;
           }
         });
-        conn.on('close', ()=>{ const s=connSlot.get(conn); if(s!=null){ players[s]=null; connSlot.delete(conn); } });
+        conn.on('close', ()=>{
+          const s=connSlot.get(conn);
+          connSlot.delete(conn);                 // スロットは空けるが…
+          if(s!=null && players[s]){ players[s].ratio=0; players[s].over=false; }  // スコアは残す（メーターのみ0）
+        });
       });
     }catch(err){ $('stat').textContent='接続の初期化に失敗: '+err; }
   }

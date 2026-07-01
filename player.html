@@ -17,6 +17,9 @@
   #status { font-size:13px; color:#cfd3de; background:rgba(0,0,0,.25); padding:6px 12px; border-radius:999px; }
   #endlabel { position:fixed; top:0; left:0; right:0; text-align:center; padding-top:max(14px,env(safe-area-inset-top));
     font-size:clamp(28px,6vh,56px); font-weight:900; color:#ff5c5c; letter-spacing:4px; pointer-events:none; z-index:5; }
+  #timeLabel { position:fixed; top:0; left:0; right:0; text-align:center; padding-top:max(12px,env(safe-area-inset-top));
+    font-size:clamp(20px,4vh,34px); font-weight:800; color:#cfd3de; font-variant-numeric:tabular-nums; pointer-events:none; z-index:4; }
+  #timeLabel.warn { color:#ffb84d; }
   #practiceBanner { position:fixed; top:0; left:0; right:0; text-align:center; padding:max(10px,env(safe-area-inset-top)) 12px 10px;
     background:rgba(255,184,77,.14); color:#ffb84d; font-size:clamp(13px,2.4vh,17px); font-weight:700; z-index:5; }
   #practiceReset { margin-top:6px; padding:8px 18px; border:1px solid #3a4054; border-radius:10px; background:transparent; color:#9aa0b0; font-size:14px; }
@@ -32,9 +35,10 @@
 </head>
 <body>
   <button id="start">タップして計測開始</button>
-  <div id="version">v1.3</div>
+  <div id="version">v1.4</div>
   <div id="status" class="hidden"></div>
   <div id="endlabel" class="hidden">終了</div>
+  <div id="timeLabel" class="hidden"></div>
   <div id="practiceBanner" class="hidden"></div>
 
   <div id="game" class="hidden">
@@ -144,6 +148,7 @@
     if(phase==='countdown') penalty=0;     // カウントダウン中は0表示
     $('pen').classList.toggle('count', phase==='countdown');
     $('endlabel').classList.toggle('hidden', phase!=='ended');
+    if(phase!=='running') $('timeLabel').classList.add('hidden');
     refreshScoreText();
   }
 
@@ -163,6 +168,13 @@
         }
         else if(d.type==='reset'){ penalty=0; refreshScoreText(); }
         else if(d.type==='phase'){ applyPhase(d.phase, d.n); }
+        else if(d.type==='time'){
+          const m=Math.floor(d.remain/60), ss=String(d.remain%60).padStart(2,'0');
+          const el=$('timeLabel');
+          el.textContent='残り '+m+':'+ss;
+          el.classList.toggle('warn', d.remain<=10);
+          if(phase==='running') el.classList.remove('hidden');
+        }
       });
       conn.on('close', ()=> setStatus('切断されました。再読み込みしてください'));
     });
