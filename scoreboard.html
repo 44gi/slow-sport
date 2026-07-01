@@ -42,7 +42,7 @@
 </head>
 <body>
   <header>
-    <h1>スコアボード</h1><span class="v">v1.1</span>
+    <h1>スコアボード</h1><span class="v">v1.2</span>
     <div class="controls">
       <label class="v">人数 <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option></select></label>
       <label class="v">時間 <select id="mins"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select>分</label>
@@ -50,6 +50,7 @@
       <button id="endMatch" disabled>試合終了</button>
       <button id="resetAll">リセット</button>
       <button id="testWhistle">ホイッスル</button>
+      <label class="v" title="BGM音量">🎵 <input id="vol" type="range" min="0" max="1" step="0.05" value="0.6" style="width:90px;vertical-align:middle;"></label>
     </div>
     <div id="timer">2:00</div>
     <div class="join">
@@ -61,6 +62,7 @@
     </div>
   </header>
   <div id="stat">起動中…</div>
+  <audio id="bgm" src="bgm.m4a" loop preload="auto"></audio>
   <div class="grid" id="grid"></div>
 
 <script>
@@ -165,6 +167,13 @@
     o.type='sine'; o.frequency.value=1200; g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.4,t+0.005); g.gain.linearRampToValueAtTime(0,t+0.12);
     o.connect(g).connect(actx.destination); o.start(t); o.stop(t+0.13); }
 
+  // ---- BGM ----
+  const bgm=$('bgm');
+  bgm.volume=parseFloat($('vol').value);
+  function bgmStart(){ try{ bgm.currentTime=0; const p=bgm.play(); if(p&&p.catch) p.catch(()=>{}); }catch(e){} }
+  function bgmStop(){ try{ bgm.pause(); }catch(e){} }
+  $('vol').addEventListener('input', e=>{ bgm.volume=parseFloat(e.target.value); });
+
   // ---- 進行制御 ----
   let remain=120, timerId=null;
   function fmt(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
@@ -193,6 +202,7 @@
     $('timer').className=''; showTimer();
     broadcast({type:'time', remain});
     whistleStart();
+    bgmStart();
     clearInterval(timerId);
     timerId=setInterval(()=>{
       remain--;
@@ -204,11 +214,13 @@
     clearInterval(timerId);
     setPhase('ended',0); remain=0;
     $('timer').className='done'; $('timer').textContent='終了';
+    bgmStop();
     whistleEnd();
     $('startMatch').disabled=false; $('endMatch').disabled=true; $('mins').disabled=false;
   }
   function resetMatch(){
     clearInterval(timerId);
+    bgmStop();
     resetScores();
     remain=parseInt($('mins').value,10)*60;
     setPhase('idle',0);
